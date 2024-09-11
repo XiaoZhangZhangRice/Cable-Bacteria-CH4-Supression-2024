@@ -1,0 +1,137 @@
+---
+title: "Cable Bateria 2024 Initial Analysis"
+author: "Zhang Zhenglin"
+output:
+  pdf_document:
+    toc: yes
+  html_notebook:
+    toc: yes
+    toc_float: yes
+editor_options:
+  markdown:
+    wrap: sentence
+---
+
+# Necessary libraries
+
+```{r echo=FALSE,message=FALSE,warning=FALSE}
+library(knitr)
+library(ggplot2)
+theme_set(theme_bw())
+library(emmeans)
+library(multcomp)
+library(PLS205)
+library(lme4)
+library(lmerTest)
+library(multcompView)
+library(car)
+library(Rmisc) 
+library(dplyr) #https://r4ds.had.co.nz/ (Chapter 3, Chapter 5, look at filter and select)
+# https://bookdown.org/ansellbr/WEHI_tidyR_course_book/
+library(stringr) 
+library(data.table)
+library(GGally)
+library(formatR)
+library(readxl)
+library(openxlsx)
+library(stringr) 
+library(data.table)
+library(GGally)
+library(formatR)
+library(mgcv)
+library(MASS)
+library(MuMIn)
+library(paletteer)
+library(data.table)
+
+```
+
+# Read data into excel
+
+```{r}
+gas_flux <- read_excel("Cable_Bateria_2024_GHG_Data.xlsx", sheet = 1)
+
+gas_flux$Trt <- gas_flux$Plot 
+gas_flux$Flux <- gas_flux$`CH4_Flux(gha-1d-1)`
+
+gas_flux$DateF <- as.factor(gas_flux$Date)
+
+#this code is to remove the rep at the end of the plot, which gives the treatment
+gas_flux <- gas_flux %>%
+mutate(Trt = substr(Trt, 1, nchar(Trt) - 2))
+table(gas_flux$Trt)
+```
+
+# Get some feeling 
+
+```{r}
+ggplot(gas_flux, aes(y=Flux, x=DateF, fill=Trt)) + geom_boxplot()
+```
+
+# Linear model:lm
+
+```{r}
+gas_model <- lm(Flux ~ Trt*DateF, data = gas_flux)
+#gas_model <- lmer(Flux ~ Trt*DateF+(1|DateF:Trt), data = gas_flux)
+pls205_diagnostics(gas_model)
+anova(gas_model)
+```
+
+```{r}
+gas_means <- emmeans(gas_model, spec ='Trt', by='DateF')
+gas_effects <- contrast(gas_means, method = 'pairwise', adjust = "tukey")
+summary(gas_effects)
+cld(gas_means,
+    Letters = letters,
+    alpha = 0.05)
+
+cld <- as.data.frame(cld(gas_means,
+    Letters = letters,
+    alpha = 0.05))
+```
+
+```{r}
+gas_graphing <- gas_flux %>% group_by(Trt, DateF) %>% 
+   mutate(Flux_sd = sd(Flux)) %>% 
+  summarise(Flux = mean(Flux),
+            Flux_sd = mean(Flux_sd)) %>%
+  left_join(cld %>% select(DateF, Trt, .group), by = c("DateF", "Trt"))
+
+
+gas_graphing$group <- gas_graphing$.group
+```
+# Graph
+
+```{r}
+second <-
+  ggplot(gas_graphing, aes(x = DateF, y = Flux, fill = Trt))+
+    geom_bar(stat = "identity", position = "dodge", width = 0.7)+
+    scale_fill_paletteer_d("nationalparkcolors::Acadia")+
+    geom_errorbar(aes(ymin=Flux-Flux_sd, ymax=Flux+Flux_sd), width=.2, size=0.8 ,position=position_dodge(0.7))+
+    scale_y_continuous(name=expression("CH4 Flux (g ha"^{-1}*" day"^{-1}*")"), expand = c(0, 0), limits = c(0, 15000))+
+    scale_x_discrete(name="")+
+    theme_classic()+
+    theme(axis.text = element_text(size = 12), axis.title = element_text(size=14))+
+    theme(legend.text = element_text(size = 12),legend.title = element_text(size = 14))+
+    geom_text(aes(label = group, y = Flux + Flux_sd + 200), position = position_dodge(0.7), vjust = 0, hjust =0.65)
+    #geom_vline(xintercept = c(1.5,2.5), linetype = "dashed", color = "black", size =0.7) 
+
+second
+
+ggsave(second, filename = "27Aug.png", height = 15, width = 20, units = "cm", dpi=100)
+```
+
+# linear model:lmer
+
+```{r}
+gas_model_lmer <- lmer(Flux ~ Trt*DateF+(1|Trt:Date), data = gas_flux)
+pls205_diagnostics(gas_model_lmer, EU ="Trt:Date" )
+anova(gas_model_lmer)
+```
+
+```{r}
+gas_means_lmer <- emmeans(gas_model_lmer, spec ='Trt', by='DateF')
+gas_effects_lmer <- contrast(gas_means_lmer, method = 'pairwise', adjust = "tukey")
+summary(gas_effects_lmer)
+cld(gas_means_lmer)
+```
